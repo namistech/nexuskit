@@ -89,6 +89,13 @@ CREATE INDEX idx_connected_accounts_tenant_id ON connected_accounts (tenant_id);
 -- Hot path: webhook lookup by ig_business_account_id happens on every inbound comment.
 CREATE INDEX idx_connected_accounts_ig_business_account_id ON connected_accounts (ig_business_account_id)
     WHERE status = 'active';
+-- Data-integrity guard: without this, the same real Instagram account could be
+-- connected as 'active' under two different tenants (or twice under one), and
+-- the webhook handler's `LIMIT 1` lookup (server.js routeCommentToCampaign)
+-- would pick an arbitrary row -- silently routing a tenant's comments/DMs to
+-- the wrong account. One active connection per Instagram account, enforced.
+CREATE UNIQUE INDEX uq_connected_accounts_active_ig_business_account_id
+    ON connected_accounts (ig_business_account_id) WHERE status = 'active';
 
 -- ============================================================================
 -- 3. CAMPAIGNS

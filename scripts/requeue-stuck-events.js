@@ -12,7 +12,7 @@
 require('dotenv').config();
 
 const { Client } = require('pg');
-const { enqueueDmJob } = require('../lib/queue');
+const { connection: redisConnection, enqueueDmJob } = require('../lib/queue');
 
 async function main() {
   const client = new Client({ connectionString: process.env.DATABASE_URL });
@@ -52,7 +52,15 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('Requeue failed:', err);
-  process.exitCode = 1;
-});
+// lib/queue.js opens a persistent ioredis connection at module load time
+// (needed for the long-running worker process) -- a one-off script that
+// imports it must close that connection explicitly, or Node's event loop
+// never empties and the process hangs forever instead of exiting.
+main()
+  .catch((err) => {
+    console.error('Requeue failed:', err);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    redisConnection.disconnect();
+  });

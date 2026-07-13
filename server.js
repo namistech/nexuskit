@@ -162,20 +162,35 @@ async function routeCommentToCampaign({ igBusinessAccountId, commentText, commen
   const { connected_account_id: connectedAccountId, tenant_id: tenantId } = accountLookup.rows[0];
 
   await withTenant(tenantId, async (client) => {
+    // Pull every active campaign for this account and match in application
+    // code rather than SQL -- match_mode ('exact' | 'contains' | 'starts_with')
+    // needs per-row conditional logic that a single `= ANY(...)` equality
+    // check can't express. (Earlier version of this query ignored match_mode
+    // entirely and always did exact-string matching against the whole
+    // comment, silently defeating campaigns left on the 'contains' default.)
     const campaignLookup = await client.query(
-      `SELECT id, dm_message_text, redirect_url
+      `SELECT id, dm_message_text, redirect_url, match_mode, trigger_keywords
        FROM campaigns
        WHERE connected_account_id = $1
          AND is_active = TRUE
-         AND $2 = ANY (SELECT lower(keyword) FROM unnest(trigger_keywords) AS keyword)
-       ORDER BY created_at ASC
-       LIMIT 1`,
-      [connectedAccountId, commentText]
+       ORDER BY created_at ASC`,
+      [connectedAccountId]
     );
 
-    if (campaignLookup.rows.length === 0) return;
+    const campaign = campaignLookup.rows.find((row) => {
+      const keywords = (row.trigger_keywords || []).map((k) => k.toLowerCase());
+      switch (row.match_mode) {
+        case 'exact':
+          return keywords.includes(commentText);
+        case 'starts_with':
+          return keywords.some((keyword) => commentText.startsWith(keyword));
+        case 'contains':
+        default:
+          return keywords.some((keyword) => commentText.includes(keyword));
+      }
+    });
 
-    const campaign = campaignLookup.rows[0];
+    if (!campaign) return;
 
     // Idempotent insert — the unique (campaign_id, ig_comment_id) constraint
     // means a Meta retry of the same webhook event will not double-queue.
