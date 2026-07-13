@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+# NexusKit worker image -- same source as the API image, but a distinct
+# Dockerfile so its own CMD (node worker.js) is baked in directly. Coolify's
+# per-application "start_command" override does not take effect for
+# Dockerfile-buildpack apps, so overriding CMD here is the reliable path.
+# No EXPOSE/HEALTHCHECK: the worker has no HTTP server to probe.
+
+FROM node:20-alpine AS base
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev || npm install --omit=dev
+
+COPY . .
+
+RUN addgroup -S nexuskit && adduser -S nexuskit -G nexuskit && chown -R nexuskit:nexuskit /app
+USER nexuskit
+
+CMD ["node", "worker.js"]
