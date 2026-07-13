@@ -42,24 +42,25 @@ async function getConnectedAccount(connectedAccountId) {
   return result.rows[0];
 }
 
-async function sendInstagramDm({ igCommentId, message, accessToken }) {
-  // Comment-triggered auto-replies must use the private_replies endpoint,
-  // not the generic /{ig-user-id}/messages endpoint. The generic messages
-  // endpoint enforces the standard 24h human-agent messaging window and
-  // rejects sends to users who haven't DM'd the account first (error code
-  // 10 / subcode 2534022, "sent outside of allowed window"). Private
-  // replies are keyed to the specific comment (not the recipient) and are
-  // exempt from that window because they're a direct response to public
-  // comment engagement -- this is the actual comment-to-DM mechanism.
+async function sendInstagramDm({ igBusinessAccountId, igCommentId, message, accessToken }) {
+  // Comment-triggered auto-replies still POST to the standard /{ig-user-id}/messages
+  // endpoint, but the recipient object uses `comment_id` instead of a user `id`.
+  // That's what exempts the send from the standard 24h human-agent messaging
+  // window (recipient: { id: <user-id> } gets rejected with error code 10 /
+  // subcode 2534022, "sent outside of allowed window", unless the user DM'd
+  // first). NOTE: a dedicated `/{comment-id}/private_replies` edge does NOT
+  // exist for Instagram (that's a Facebook Page-comment mechanism) -- it
+  // returns code 100 / subcode 33 "object does not exist" if you try it here.
   // Using the Instagram API with Instagram Login (graph.instagram.com), not the
   // classic Facebook Page-linked flow (graph.facebook.com) -- the access token
   // is an Instagram User Access Token, not a Page Access Token.
-  const url = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igCommentId}/private_replies`;
+  const url = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igBusinessAccountId}/messages`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      message,
+      recipient: { comment_id: igCommentId },
+      message: { text: message },
       access_token: accessToken,
     }),
   });
@@ -121,6 +122,7 @@ const worker = new Worker(
 
     try {
       await sendInstagramDm({
+        igBusinessAccountId: account.ig_business_account_id,
         igCommentId,
         message: messageText,
         accessToken,
