@@ -99,6 +99,47 @@
       </div>
     </section>
 
+    <!-- ============================== PENDING FOLLOW CONFIRMATIONS ============================== -->
+    <section id="pending-follows" x-show="pendingFollowEvents.length > 0" x-cloak>
+      <h2 class="text-sm font-semibold text-ink-900 mb-1">Pending follow confirmations</h2>
+      <p class="text-xs text-ink-700 mb-3">
+        Someone tapped "I Followed". Instagram doesn't let us verify that automatically —
+        check their profile, then approve to send the reward.
+      </p>
+      <div class="bg-white border border-warm-200 rounded-2xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-warm-50 text-ink-700 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left px-4 py-2.5">Automation</th>
+              <th class="text-left px-4 py-2.5">Account</th>
+              <th class="text-left px-4 py-2.5">Commenter ID</th>
+              <th class="text-left px-4 py-2.5">Tapped "I Followed"</th>
+              <th class="px-4 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-warm-100">
+            <template x-for="ev in pendingFollowEvents" :key="ev.id">
+              <tr>
+                <td class="px-4 py-3 font-medium text-ink-900" x-text="ev.campaign_name"></td>
+                <td class="px-4 py-3 text-ink-700">@<span x-text="ev.ig_username"></span></td>
+                <td class="px-4 py-3 text-ink-700" x-text="ev.ig_commenter_id"></td>
+                <td class="px-4 py-3 text-ink-700" x-text="formatDate(ev.confirmed_at)"></td>
+                <td class="px-4 py-3 text-right">
+                  <a :href="'https://www.instagram.com/' + ev.ig_commenter_id + '/'" target="_blank" rel="noopener"
+                     class="text-xs font-medium text-ink-600 hover:text-ink-800 mr-3">Check profile ↗</a>
+                  <button @click="approveFollowGate(ev)" :disabled="approvingIds.includes(ev.id)"
+                          class="bg-accent-500 hover:bg-accent-600 disabled:opacity-60 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">
+                    <span x-show="!approvingIds.includes(ev.id)">Approve &amp; send reward</span>
+                    <span x-show="approvingIds.includes(ev.id)" x-cloak>Sending…</span>
+                  </button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- ============================== CAMPAIGNS ============================== -->
     <section id="campaigns">
       <h2 class="text-sm font-semibold text-ink-900 mb-3">Automations</h2>
@@ -272,6 +313,8 @@ function nexusDashboard() {
     me: {},
     summary: {},
     campaigns: [],
+    pendingFollowEvents: [],
+    approvingIds: [],
     loadError: '',
     showCampaignModal: false,
     editingId: null,
@@ -287,7 +330,11 @@ function nexusDashboard() {
           return;
         }
         this.me = await meRes.json();
-        await Promise.all([this.loadSummary(), this.loadCampaigns()]);
+        await Promise.all([this.loadSummary(), this.loadCampaigns(), this.loadPendingFollowEvents()]);
+        // Pending follow confirmations can arrive at any time (a customer
+        // taps the button whenever they get around to it), so poll instead
+        // of only loading once on page open.
+        setInterval(() => this.loadPendingFollowEvents(), 20000);
       } catch (err) {
         this.loadError = 'Failed to load dashboard: ' + err.message;
       }
@@ -303,6 +350,30 @@ function nexusDashboard() {
       const res = await fetch('/api/campaigns');
       if (!res.ok) throw new Error('campaigns fetch failed');
       this.campaigns = await res.json();
+    },
+
+    async loadPendingFollowEvents() {
+      const res = await fetch('/api/follow-gate-events?status=confirmed');
+      if (!res.ok) return; // non-fatal -- don't blow up the whole dashboard over this
+      this.pendingFollowEvents = await res.json();
+    },
+
+    async approveFollowGate(ev) {
+      if (this.approvingIds.includes(ev.id)) return;
+      this.approvingIds.push(ev.id);
+      try {
+        const res = await fetch(`/api/follow-gate-events/${ev.id}/approve`, { method: 'POST' });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Approve failed');
+        }
+        this.pendingFollowEvents = this.pendingFollowEvents.filter((e) => e.id !== ev.id);
+        await this.loadSummary();
+      } catch (err) {
+        this.loadError = err.message;
+      } finally {
+        this.approvingIds = this.approvingIds.filter((id) => id !== ev.id);
+      }
     },
 
     openNewCampaignModal() {

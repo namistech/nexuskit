@@ -323,7 +323,14 @@ async function routeCommentToCampaign({ igBusinessAccountId, commentText, commen
  * FOLLOW_CONFIRM__<campaignId>__<igCommentId>, flips the matching
  * follow_gate_events row from 'gate_sent' to 'confirmed' (idempotent --
  * a second tap is a no-op because the UPDATE's WHERE clause only matches
- * 'gate_sent'), then enqueues the actual reward send.
+ * 'gate_sent').
+ *
+ * IMPORTANT: this does NOT send the reward. Instagram's API has no way to
+ * verify an arbitrary user actually follows the business account -- the
+ * button tap is just a self-report from the commenter. The reward only goes
+ * out once a tenant user explicitly approves it from the dashboard (see
+ * POST /api/follow-gate-events/:id/approve below), which is the real
+ * "validate every time" step from the original spec.
  */
 async function handleMessagingEvent({ igBusinessAccountId, messagingEvent }) {
   const senderId = messagingEvent.sender && messagingEvent.sender.id;
@@ -350,33 +357,17 @@ async function handleMessagingEvent({ igBusinessAccountId, messagingEvent }) {
     [igBusinessAccountId]
   );
   if (accountLookup.rows.length === 0) return;
-  const { connected_account_id: connectedAccountId, tenant_id: tenantId } = accountLookup.rows[0];
+  const { tenant_id: tenantId } = accountLookup.rows[0];
 
   await withTenant(tenantId, async (client) => {
-    const gateUpdate = await client.query(
+    // Just flip the status -- no reward enqueue here. This row now shows up
+    // in the "Pending follow confirmations" section of the dashboard for a
+    // human to check and approve.
+    await client.query(
       `UPDATE follow_gate_events SET status = 'confirmed', confirmed_at = now()
-       WHERE campaign_id = $1 AND ig_comment_id = $2 AND status = 'gate_sent'
-       RETURNING id`,
+       WHERE campaign_id = $1 AND ig_comment_id = $2 AND status = 'gate_sent'`,
       [campaignId, igCommentId]
     );
-    if (gateUpdate.rows.length === 0) return; // already confirmed (duplicate tap), or unknown -- ignore
-
-    const campaignLookup = await client.query(
-      `SELECT dm_message_text, redirect_url FROM campaigns WHERE id = $1`,
-      [campaignId]
-    );
-    if (campaignLookup.rows.length === 0) return;
-    const campaign = campaignLookup.rows[0];
-
-    await enqueueRewardJob({
-      tenantId,
-      campaignId,
-      connectedAccountId,
-      igCommentId,
-      igCommenterId: senderId,
-      dmMessageText: campaign.dm_message_text,
-      redirectUrl: campaign.redirect_url,
-    });
   });
 }
 
@@ -599,6 +590,87 @@ app.patch('/api/campaigns/:id', requireAuth, async (req, res, next) => {
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Campaign not found' });
     res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================================
+// FOLLOW-GATE REVIEW API
+// Manual "did they really follow?" checkpoint. A customer tapping "I
+// Followed" only moves a row to 'confirmed' (see handleMessagingEvent
+// above) -- it never sends the reward on its own. A tenant user has to look
+// at the commenter's profile on Instagram and explicitly approve here
+// before the reward DM goes out.
+// ============================================================================
+
+app.get('/api/follow-gate-events', requireAuth, async (req, res, next) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : 'confirmed';
+    const result = await withTenant(req.user.tenantId, (client) =>
+      client.query(
+        `SELECT fge.id, fge.campaign_id, fge.ig_comment_id, fge.ig_commenter_id, fge.status,
+                fge.gate_sent_at, fge.confirmed_at, fge.approved_at, fge.reward_sent_at,
+                c.name AS campaign_name, ca.ig_username
+         FROM follow_gate_events fge
+         JOIN campaigns c ON c.id = fge.campaign_id
+         JOIN connected_accounts ca ON ca.id = c.connected_account_id
+         WHERE fge.status = $1
+         ORDER BY fge.confirmed_at DESC NULLS LAST, fge.gate_sent_at DESC
+         LIMIT 100`,
+        [status]
+      )
+    );
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/follow-gate-events/:id/approve', requireAuth, async (req, res, next) => {
+  try {
+    const result = await withTenant(req.user.tenantId, async (client) => {
+      // Guarded by `status = 'confirmed'` so a double-click (or two admins
+      // approving the same row) can only ever enqueue the reward once.
+      const approval = await client.query(
+        `UPDATE follow_gate_events
+         SET status = 'approved', approved_at = now(), approved_by = $2
+         WHERE id = $1 AND status = 'confirmed'
+         RETURNING campaign_id, ig_comment_id, ig_commenter_id`,
+        [req.params.id, req.user.id]
+      );
+      if (approval.rows.length === 0) return null;
+
+      const { campaign_id: campaignId, ig_comment_id: igCommentId, ig_commenter_id: igCommenterId } = approval.rows[0];
+
+      const campaignLookup = await client.query(
+        `SELECT connected_account_id, dm_message_text, redirect_url FROM campaigns WHERE id = $1`,
+        [campaignId]
+      );
+      if (campaignLookup.rows.length === 0) {
+        const err = new Error('Campaign no longer exists');
+        err.statusCode = 400;
+        throw err;
+      }
+      const campaign = campaignLookup.rows[0];
+
+      await enqueueRewardJob({
+        tenantId: req.user.tenantId,
+        campaignId,
+        connectedAccountId: campaign.connected_account_id,
+        igCommentId,
+        igCommenterId,
+        dmMessageText: campaign.dm_message_text,
+        redirectUrl: campaign.redirect_url,
+      });
+
+      return { id: req.params.id };
+    });
+
+    if (!result) {
+      return res.status(409).json({ error: 'Already approved, not yet confirmed, or not found' });
+    }
+    res.json({ ok: true, status: 'approved' });
   } catch (err) {
     next(err);
   }
