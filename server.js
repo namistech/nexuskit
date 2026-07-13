@@ -18,6 +18,9 @@ const {
   SESSION_COOKIE_NAME,
   SESSION_TTL_MS,
 } = require('./lib/auth');
+const { encryptSecret, decryptSecret } = require('./lib/tokenCipher');
+const totp = require('./lib/totp');
+const mailer = require('./lib/mailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -66,7 +69,8 @@ async function attachUser(req, _res, next) {
     const tokenHash = hashSessionToken(token);
     const result = await queryUnscoped(
       `SELECT s.user_id, s.tenant_id, s.expires_at,
-              u.email, u.full_name, u.role, u.is_platform_admin
+              u.email, u.username, u.full_name, u.role, u.is_platform_admin,
+              u.theme_preference, u.totp_enabled
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = $1`,
@@ -81,9 +85,12 @@ async function attachUser(req, _res, next) {
       id: row.user_id,
       tenantId: row.tenant_id,
       email: row.email,
+      username: row.username,
       fullName: row.full_name,
       role: row.role,
       isPlatformAdmin: row.is_platform_admin,
+      themePreference: row.theme_preference,
+      totpEnabled: row.totp_enabled,
     };
     next();
   } catch (err) {
@@ -376,7 +383,7 @@ async function handleMessagingEvent({ igBusinessAccountId, messagingEvent }) {
 // ============================================================================
 
 app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, totpToken } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
   // NOTE: email uniqueness is enforced per-tenant (tenant_id, lower(email)),
@@ -385,7 +392,8 @@ app.post('/api/auth/login', async (req, res) => {
   // you're the only real customer; once you onboard others, either enforce
   // global email uniqueness or add a workspace selector to login.
   const result = await queryUnscoped(
-    `SELECT id, tenant_id, email, password_hash, role, is_platform_admin
+    `SELECT id, tenant_id, email, password_hash, role, is_platform_admin,
+            totp_enabled, totp_secret_encrypted
      FROM users WHERE lower(email) = lower($1) LIMIT 1`,
     [email]
   );
@@ -395,6 +403,19 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   const user = result.rows[0];
+
+  if (user.totp_enabled) {
+    const secret = decryptSecret(user.totp_secret_encrypted);
+    if (!totpToken) {
+      // Password was correct but a second factor is required -- the login
+      // form re-submits with totpToken once the user enters their code.
+      return res.status(401).json({ error: 'totp_required', requiresTotp: true });
+    }
+    if (!totp.verifyToken(secret, totpToken)) {
+      return res.status(401).json({ error: 'Invalid authentication code' });
+    }
+  }
+
   const token = generateSessionToken();
   const tokenHash = hashSessionToken(token);
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
@@ -419,6 +440,142 @@ app.post('/api/auth/logout', requireAuth, async (req, res) => {
 
 app.get('/api/me', requireAuth, (req, res) => {
   res.json(req.user);
+});
+
+// ============================================================================
+// ACCOUNT & SECURITY API (any authenticated user, own account only)
+// ============================================================================
+
+app.patch('/api/me', requireAuth, async (req, res, next) => {
+  try {
+    const { username, fullName, themePreference } = req.body || {};
+    const updates = [];
+    const values = [];
+    let i = 1;
+
+    if (username !== undefined) {
+      updates.push(`username = $${i}`);
+      values.push(username || null);
+      i += 1;
+    }
+    if (fullName !== undefined) {
+      updates.push(`full_name = $${i}`);
+      values.push(fullName || null);
+      i += 1;
+    }
+    if (themePreference !== undefined) {
+      if (!['light', 'dark'].includes(themePreference)) {
+        return res.status(400).json({ error: "themePreference must be 'light' or 'dark'" });
+      }
+      updates.push(`theme_preference = $${i}`);
+      values.push(themePreference);
+      i += 1;
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    values.push(req.user.id);
+    const result = await queryUnscoped(
+      `UPDATE users SET ${updates.join(', ')}, updated_at = now() WHERE id = $${i}
+       RETURNING id, email, username, full_name, role, is_platform_admin, theme_preference, totp_enabled`,
+      values
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      err.statusCode = 409;
+      err.message = 'That username is already taken in your workspace';
+    }
+    next(err);
+  }
+});
+
+app.post('/api/me/password', requireAuth, async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'currentPassword and newPassword required' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'newPassword must be at least 8 characters' });
+    }
+
+    const result = await queryUnscoped(`SELECT password_hash FROM users WHERE id = $1`, [req.user.id]);
+    if (result.rows.length === 0 || !verifyPassword(currentPassword, result.rows[0].password_hash)) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    await queryUnscoped(`UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, [
+      hashPassword(newPassword),
+      req.user.id,
+    ]);
+    // Invalidate every other session so a stolen session cookie doesn't
+    // survive a password change.
+    await queryUnscoped(`DELETE FROM sessions WHERE user_id = $1`, [req.user.id]);
+
+    const token = generateSessionToken();
+    const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+    await queryUnscoped(
+      `INSERT INTO sessions (user_id, tenant_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)`,
+      [req.user.id, req.user.tenantId, hashSessionToken(token), expiresAt]
+    );
+    res.setHeader('Set-Cookie', serializeSessionCookie(token));
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/me/2fa/setup', requireAuth, async (req, res, next) => {
+  try {
+    const secret = totp.generateSecret();
+    // Stored immediately but totp_enabled stays false until /verify
+    // succeeds -- so an abandoned setup never locks anyone out.
+    await queryUnscoped(`UPDATE users SET totp_secret_encrypted = $1 WHERE id = $2`, [
+      encryptSecret(secret),
+      req.user.id,
+    ]);
+    const otpauthUri = totp.buildOtpAuthUri(secret, req.user.email, 'NexusKit');
+    res.json({
+      secret,
+      otpauthUri,
+      qrImageUrl: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(otpauthUri)}`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/me/2fa/verify', requireAuth, async (req, res, next) => {
+  try {
+    const { token } = req.body || {};
+    const result = await queryUnscoped(`SELECT totp_secret_encrypted FROM users WHERE id = $1`, [req.user.id]);
+    const secret = result.rows.length ? decryptSecret(result.rows[0].totp_secret_encrypted) : null;
+    if (!secret || !totp.verifyToken(secret, token)) {
+      return res.status(400).json({ error: 'Invalid code -- try again' });
+    }
+    await queryUnscoped(`UPDATE users SET totp_enabled = TRUE WHERE id = $1`, [req.user.id]);
+    res.json({ ok: true, totpEnabled: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/me/2fa/disable', requireAuth, async (req, res, next) => {
+  try {
+    const { password } = req.body || {};
+    const result = await queryUnscoped(`SELECT password_hash FROM users WHERE id = $1`, [req.user.id]);
+    if (result.rows.length === 0 || !verifyPassword(password || '', result.rows[0].password_hash)) {
+      return res.status(401).json({ error: 'Password is incorrect' });
+    }
+    await queryUnscoped(
+      `UPDATE users SET totp_enabled = FALSE, totp_secret_encrypted = NULL WHERE id = $1`,
+      [req.user.id]
+    );
+    res.json({ ok: true, totpEnabled: false });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // ============================================================================
@@ -748,6 +905,366 @@ app.get('/api/admin/overview', requireAdmin, async (req, res, next) => {
     });
 
     res.json(overview);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ----------------------------------------------------------------------------
+// User & tenant (membership) management
+// ----------------------------------------------------------------------------
+
+app.get('/api/admin/users', requireAdmin, async (req, res, next) => {
+  try {
+    const result = await withAdmin((client) =>
+      client.query(
+        `SELECT u.id, u.tenant_id, u.email, u.username, u.full_name, u.role,
+                u.is_platform_admin, u.is_email_verified, u.totp_enabled,
+                u.last_login_at, u.created_at,
+                t.name AS tenant_name, t.slug AS tenant_slug, t.billing_tier, t.is_active AS tenant_is_active
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+         ORDER BY u.created_at ASC`
+      )
+    );
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/api/admin/users/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const allowedFields = {
+      fullName: 'full_name',
+      role: 'role',
+      isPlatformAdmin: 'is_platform_admin',
+      isEmailVerified: 'is_email_verified',
+    };
+    const updates = [];
+    const values = [];
+    let i = 1;
+    for (const [bodyKey, column] of Object.entries(allowedFields)) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, bodyKey)) {
+        updates.push(`${column} = $${i}`);
+        values.push(req.body[bodyKey]);
+        i += 1;
+      }
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    values.push(req.params.id);
+    const result = await withAdmin((client) =>
+      client.query(
+        `UPDATE users SET ${updates.join(', ')}, updated_at = now() WHERE id = $${i}
+         RETURNING id, email, username, full_name, role, is_platform_admin, is_email_verified`,
+        values
+      )
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin-initiated password reset -- generates a fresh password and returns
+// it once (shown to the admin to relay to the user); never emailed in
+// plaintext, never stored anywhere but the hash.
+app.post('/api/admin/users/:id/reset-password', requireAdmin, async (req, res, next) => {
+  try {
+    const tempPassword = crypto.randomBytes(9).toString('base64url'); // 12 chars, URL-safe
+    const result = await withAdmin((client) =>
+      client.query(`UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2 RETURNING id, email`, [
+        hashPassword(tempPassword),
+        req.params.id,
+      ])
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    await queryUnscoped(`DELETE FROM sessions WHERE user_id = $1`, [req.params.id]);
+    res.json({ ok: true, email: result.rows[0].email, temporaryPassword: tempPassword });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/api/admin/tenants/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const allowedFields = { name: 'name', billingTier: 'billing_tier', isActive: 'is_active' };
+    const updates = [];
+    const values = [];
+    let i = 1;
+    for (const [bodyKey, column] of Object.entries(allowedFields)) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, bodyKey)) {
+        updates.push(`${column} = $${i}`);
+        values.push(req.body[bodyKey]);
+        i += 1;
+      }
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    values.push(req.params.id);
+    const result = await withAdmin((client) =>
+      client.query(`UPDATE tenants SET ${updates.join(', ')}, updated_at = now() WHERE id = $${i} RETURNING *`, values)
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ----------------------------------------------------------------------------
+// Notifications (in-app + custom email)
+// ----------------------------------------------------------------------------
+
+app.get('/api/notifications', requireAuth, async (req, res, next) => {
+  try {
+    // A user sees: notifications addressed to them directly, broadcasts to
+    // their whole tenant (user_id IS NULL, tenant_id = theirs), and
+    // platform-wide broadcasts (both NULL). Deliberately queryUnscoped --
+    // this table isn't RLS'd (see migration 004) and every branch here is
+    // explicitly scoped to req.user.
+    const result = await queryUnscoped(
+      `SELECT id, title, body, channel, created_at, read_at
+       FROM notifications
+       WHERE user_id = $1
+          OR (user_id IS NULL AND tenant_id = $2)
+          OR (user_id IS NULL AND tenant_id IS NULL)
+       ORDER BY created_at DESC LIMIT 50`,
+      [req.user.id, req.user.tenantId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/notifications/:id/read', requireAuth, async (req, res, next) => {
+  try {
+    await queryUnscoped(
+      `UPDATE notifications SET read_at = now()
+       WHERE id = $1 AND read_at IS NULL
+         AND (user_id = $2 OR user_id IS NULL)`,
+      [req.params.id, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/admin/notifications', requireAdmin, async (req, res, next) => {
+  try {
+    const { tenantId, userId, channel, title, body } = req.body || {};
+    if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
+    if (!['in_app', 'email'].includes(channel)) {
+      return res.status(400).json({ error: "channel must be 'in_app' or 'email'" });
+    }
+
+    if (channel === 'in_app') {
+      await queryUnscoped(
+        `INSERT INTO notifications (tenant_id, user_id, channel, title, body, sent_by)
+         VALUES ($1, $2, 'in_app', $3, $4, $5)`,
+        [tenantId || null, userId || null, title, body, req.user.id]
+      );
+      return res.json({ ok: true, delivered: 'in_app' });
+    }
+
+    // channel === 'email' -- resolve recipients, then send individually.
+    // Capped at 500 recipients per send as a basic safety limit.
+    let recipients;
+    if (userId) {
+      recipients = await queryUnscoped(`SELECT id, email FROM users WHERE id = $1`, [userId]);
+    } else if (tenantId) {
+      recipients = await queryUnscoped(`SELECT id, email FROM users WHERE tenant_id = $1 LIMIT 500`, [tenantId]);
+    } else {
+      recipients = await queryUnscoped(`SELECT id, email FROM users LIMIT 500`);
+    }
+    if (recipients.rows.length === 0) return res.status(404).json({ error: 'No matching recipients' });
+
+    const bodyHtml = body.replace(/\n/g, '<br>');
+    const results = await Promise.allSettled(recipients.rows.map((r) => mailer.sendMail(r.email, title, bodyHtml)));
+    const failures = results.filter((r) => r.status === 'rejected').length;
+
+    await queryUnscoped(
+      `INSERT INTO notifications (tenant_id, user_id, channel, title, body, sent_by)
+       VALUES ($1, $2, 'email', $3, $4, $5)`,
+      [tenantId || null, userId || null, title, body, req.user.id]
+    );
+
+    res.json({ ok: true, delivered: 'email', sent: recipients.rows.length - failures, failed: failures });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ----------------------------------------------------------------------------
+// Platform settings -- SMTP, payment gateways, channel toggles.
+// Secrets are never sent back to the client in plaintext: GET returns
+// `*_configured: true/false` flags instead of the actual value.
+// ----------------------------------------------------------------------------
+
+// camelKey -> [DB column, name of the boolean flag GET returns instead of the value]
+const SETTINGS_SECRET_FIELDS = {
+  smtpPassword: ['smtp_password_encrypted', 'smtpPasswordConfigured'],
+  stripeSecretKey: ['stripe_secret_key_encrypted', 'stripeSecretKeyConfigured'],
+  paypalClientSecret: ['paypal_client_secret_encrypted', 'paypalClientSecretConfigured'],
+  safepayApiKey: ['safepay_api_key_encrypted', 'safepayApiKeyConfigured'],
+  safepaySecretKey: ['safepay_secret_key_encrypted', 'safepaySecretKeyConfigured'],
+  payfastMerchantKey: ['payfast_merchant_key_encrypted', 'payfastMerchantKeyConfigured'],
+  payfastPassphrase: ['payfast_passphrase_encrypted', 'payfastPassphraseConfigured'],
+  tiktokClientSecret: ['tiktok_client_secret_encrypted', 'tiktokClientSecretConfigured'],
+  youtubeClientSecret: ['youtube_client_secret_encrypted', 'youtubeClientSecretConfigured'],
+  twitterApiSecret: ['twitter_api_secret_encrypted', 'twitterApiSecretConfigured'],
+};
+
+const SETTINGS_PLAIN_FIELDS = {
+  smtpHost: 'smtp_host',
+  smtpPort: 'smtp_port',
+  smtpUsername: 'smtp_username',
+  smtpFromEmail: 'smtp_from_email',
+  smtpSecure: 'smtp_secure',
+  stripeEnabled: 'stripe_enabled',
+  stripePublishableKey: 'stripe_publishable_key',
+  paypalEnabled: 'paypal_enabled',
+  paypalClientId: 'paypal_client_id',
+  safepayEnabled: 'safepay_enabled',
+  payfastEnabled: 'payfast_enabled',
+  payfastMerchantId: 'payfast_merchant_id',
+  instagramEnabled: 'instagram_enabled',
+  tiktokEnabled: 'tiktok_enabled',
+  tiktokClientKey: 'tiktok_client_key',
+  youtubeEnabled: 'youtube_enabled',
+  youtubeClientId: 'youtube_client_id',
+  twitterEnabled: 'twitter_enabled',
+  twitterApiKey: 'twitter_api_key',
+};
+
+app.get('/api/admin/settings', requireAdmin, async (req, res, next) => {
+  try {
+    const result = await queryUnscoped(`SELECT * FROM platform_settings WHERE id = 1`);
+    const row = result.rows[0] || {};
+
+    const settings = {};
+    for (const [camelKey, column] of Object.entries(SETTINGS_PLAIN_FIELDS)) {
+      settings[camelKey] = row[column];
+    }
+    for (const [column, configuredKey] of Object.values(SETTINGS_SECRET_FIELDS)) {
+      settings[configuredKey] = Boolean(row[column]);
+    }
+    res.json(settings);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/api/admin/settings', requireAdmin, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const updates = [];
+    const values = [];
+    let i = 1;
+
+    for (const [camelKey, column] of Object.entries(SETTINGS_PLAIN_FIELDS)) {
+      if (Object.prototype.hasOwnProperty.call(body, camelKey)) {
+        updates.push(`${column} = $${i}`);
+        values.push(body[camelKey]);
+        i += 1;
+      }
+    }
+    // Secret fields: a non-empty string re-encrypts and stores; an empty
+    // string explicitly clears the stored secret; omitted = leave as-is.
+    for (const [camelKey, [column]] of Object.entries(SETTINGS_SECRET_FIELDS)) {
+      if (Object.prototype.hasOwnProperty.call(body, camelKey)) {
+        updates.push(`${column} = $${i}`);
+        values.push(body[camelKey] === '' ? null : encryptSecret(body[camelKey]));
+        i += 1;
+      }
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    updates.push(`updated_at = now()`, `updated_by = $${i}`);
+    values.push(req.user.id);
+
+    await queryUnscoped(`UPDATE platform_settings SET ${updates.join(', ')} WHERE id = 1`, values);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ----------------------------------------------------------------------------
+// Payment plans
+// ----------------------------------------------------------------------------
+
+app.get('/api/admin/payment-plans', requireAdmin, async (req, res, next) => {
+  try {
+    const result = await queryUnscoped(`SELECT * FROM payment_plans ORDER BY price_cents ASC`);
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/admin/payment-plans', requireAdmin, async (req, res, next) => {
+  try {
+    const { name, priceCents, currency, billingInterval, features } = req.body || {};
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const result = await queryUnscoped(
+      `INSERT INTO payment_plans (name, price_cents, currency, billing_interval, features)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [name, priceCents || 0, currency || 'USD', billingInterval || 'month', JSON.stringify(features || [])]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/api/admin/payment-plans/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const allowedFields = {
+      name: 'name',
+      priceCents: 'price_cents',
+      currency: 'currency',
+      billingInterval: 'billing_interval',
+      isActive: 'is_active',
+    };
+    const updates = [];
+    const values = [];
+    let i = 1;
+    for (const [bodyKey, column] of Object.entries(allowedFields)) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, bodyKey)) {
+        updates.push(`${column} = $${i}`);
+        values.push(req.body[bodyKey]);
+        i += 1;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'features')) {
+      updates.push(`features = $${i}`);
+      values.push(JSON.stringify(req.body.features));
+      i += 1;
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    values.push(req.params.id);
+    const result = await queryUnscoped(
+      `UPDATE payment_plans SET ${updates.join(', ')}, updated_at = now() WHERE id = $${i} RETURNING *`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Plan not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete('/api/admin/payment-plans/:id', requireAdmin, async (req, res, next) => {
+  try {
+    await queryUnscoped(`DELETE FROM payment_plans WHERE id = $1`, [req.params.id]);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

@@ -20,11 +20,30 @@
     },
   };
 </script>
-<style>[x-cloak] { display: none !important; }</style>
+<style>
+  [x-cloak] { display: none !important; }
+
+  /* Same lightweight dark-mode skin as admin.html -- see that file for why
+     this uses a CSS override approach instead of Tailwind dark: variants. */
+  [data-theme="dark"] body { background-color: #16140f; color: #e8e3da; }
+  [data-theme="dark"] .bg-warm-50 { background-color: #16140f !important; }
+  [data-theme="dark"] .bg-warm-50\/90 { background-color: rgba(22,20,15,0.9) !important; }
+  [data-theme="dark"] .bg-white { background-color: #201d17 !important; }
+  [data-theme="dark"] .bg-warm-100 { background-color: #2a261d !important; }
+  [data-theme="dark"] .border-warm-100 { border-color: #322d22 !important; }
+  [data-theme="dark"] .border-warm-200 { border-color: #3a3426 !important; }
+  [data-theme="dark"] .border-warm-300 { border-color: #4a422f !important; }
+  [data-theme="dark"] .text-ink-900 { color: #f2ede2 !important; }
+  [data-theme="dark"] .text-ink-800 { color: #e8e3da !important; }
+  [data-theme="dark"] .text-ink-700 { color: #b8b0a0 !important; }
+  [data-theme="dark"] input, [data-theme="dark"] select, [data-theme="dark"] textarea {
+    background-color: #201d17 !important; color: #e8e3da !important;
+  }
+</style>
 </head>
 <body class="bg-warm-50 text-ink-800 font-sans antialiased">
 
-<div x-data="nexusDashboard()" x-init="init()" class="min-h-screen" x-cloak>
+<div x-data="nexusDashboard()" x-init="init()" :data-theme="theme" class="min-h-screen" x-cloak>
 
   <!-- ============================== HEADER ============================== -->
   <header class="sticky top-0 z-40 bg-warm-50/90 backdrop-blur border-b border-warm-200">
@@ -38,6 +57,10 @@
         <button @click="openNewCampaignModal()"
                 class="inline-flex items-center gap-1.5 bg-accent-500 hover:bg-accent-600 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-colors">
           <span class="text-lg leading-none">+</span> New Automation
+        </button>
+        <button @click="toggleTheme()" class="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-sm"
+                :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+          <span x-text="theme === 'dark' ? '☀️' : '🌙'"></span>
         </button>
         <div class="relative" x-data="{ open: false }">
           <button @click="open = !open" class="w-9 h-9 rounded-full bg-warm-200 flex items-center justify-center text-sm font-semibold text-ink-700"
@@ -321,6 +344,7 @@ function nexusDashboard() {
     saving: false,
     formError: '',
     form: {},
+    theme: 'light',
 
     async init() {
       try {
@@ -330,6 +354,7 @@ function nexusDashboard() {
           return;
         }
         this.me = await meRes.json();
+        this.theme = this.me.themePreference || 'light';
         await Promise.all([this.loadSummary(), this.loadCampaigns(), this.loadPendingFollowEvents()]);
         // Pending follow confirmations can arrive at any time (a customer
         // taps the button whenever they get around to it), so poll instead
@@ -455,6 +480,15 @@ function nexusDashboard() {
     async logout() {
       await fetch('/api/auth/logout', { method: 'POST' });
       window.location.href = '/login.html';
+    },
+
+    async toggleTheme() {
+      this.theme = this.theme === 'dark' ? 'light' : 'dark';
+      await fetch('/api/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themePreference: this.theme }),
+      });
     },
 
     formatDate(iso) {

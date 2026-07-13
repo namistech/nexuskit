@@ -20,105 +20,468 @@
     },
   };
 </script>
-<style>[x-cloak] { display: none !important; }</style>
+<style>
+  [x-cloak] { display: none !important; }
+
+  /* Lightweight dark-mode skin: overrides the existing Tailwind utility
+     classes via a [data-theme="dark"] ancestor selector instead of
+     retrofitting dark: variants onto every element. Toggled by
+     nexusAdmin().theme and persisted to users.theme_preference. */
+  [data-theme="dark"] body { background-color: #16140f; color: #e8e3da; }
+  [data-theme="dark"] .bg-warm-50 { background-color: #16140f !important; }
+  [data-theme="dark"] .bg-warm-50\/90 { background-color: rgba(22,20,15,0.9) !important; }
+  [data-theme="dark"] .bg-white { background-color: #201d17 !important; }
+  [data-theme="dark"] .bg-warm-100 { background-color: #2a261d !important; }
+  [data-theme="dark"] .border-warm-100 { border-color: #322d22 !important; }
+  [data-theme="dark"] .border-warm-200 { border-color: #3a3426 !important; }
+  [data-theme="dark"] .border-warm-300 { border-color: #4a422f !important; }
+  [data-theme="dark"] .text-ink-900 { color: #f2ede2 !important; }
+  [data-theme="dark"] .text-ink-800 { color: #e8e3da !important; }
+  [data-theme="dark"] .text-ink-700 { color: #b8b0a0 !important; }
+  [data-theme="dark"] input, [data-theme="dark"] select, [data-theme="dark"] textarea {
+    background-color: #201d17 !important; color: #e8e3da !important;
+  }
+</style>
 </head>
 <body class="bg-warm-50 text-ink-800 font-sans antialiased">
 
-<div x-data="nexusAdmin()" x-init="init()" class="min-h-screen" x-cloak>
+<div x-data="nexusAdmin()" x-init="init()" :data-theme="theme" class="min-h-screen flex" x-cloak>
 
-  <header class="sticky top-0 z-40 bg-ink-900 text-white">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <div class="w-8 h-8 rounded-lg bg-accent-500 flex items-center justify-center text-white font-bold text-sm">N</div>
-        <span class="font-semibold text-lg">NexusKit</span>
-        <span class="text-[11px] font-medium uppercase tracking-wide bg-white/10 px-2 py-0.5 rounded-full">Platform admin</span>
-      </div>
-      <div class="flex items-center gap-3 text-sm">
-        <a href="/" class="text-white/80 hover:text-white">My workspace</a>
-        <button @click="logout()" class="text-white/80 hover:text-white">Sign out</button>
-      </div>
-    </div>
-  </header>
-
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-10">
-
-    <div x-show="loadError" x-cloak class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
-      <span x-text="loadError"></span>
+  <!-- ============================== SIDEBAR ============================== -->
+  <aside class="w-60 shrink-0 bg-ink-900 text-white/90 min-h-screen flex flex-col">
+    <div class="px-4 py-4 flex items-center gap-2 border-b border-white/10">
+      <div class="w-8 h-8 rounded-lg bg-accent-500 flex items-center justify-center text-white font-bold text-sm">N</div>
+      <span class="font-semibold text-white text-lg">NexusKit</span>
+      <span class="ml-auto text-[10px] font-medium uppercase tracking-wide bg-white/10 px-2 py-0.5 rounded-full">Admin</span>
     </div>
 
-    <!-- ============================== PLATFORM TOTALS ============================== -->
-    <section>
-      <h2 class="text-sm font-semibold text-ink-900 mb-3">Platform totals</h2>
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <div class="bg-white border border-warm-200 rounded-2xl p-4">
-          <div class="text-xs text-ink-700">Tenants</div>
-          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalTenants ?? 0"></div>
-        </div>
-        <div class="bg-white border border-warm-200 rounded-2xl p-4">
-          <div class="text-xs text-ink-700">Connected accounts</div>
-          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalConnectedAccounts ?? 0"></div>
-        </div>
-        <div class="bg-white border border-warm-200 rounded-2xl p-4">
-          <div class="text-xs text-ink-700">Automations</div>
-          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalCampaigns ?? 0"></div>
-        </div>
-        <div class="bg-white border border-warm-200 rounded-2xl p-4">
-          <div class="text-xs text-ink-700">Total triggers</div>
-          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalTriggers ?? 0"></div>
-        </div>
-        <div class="bg-white border border-warm-200 rounded-2xl p-4">
-          <div class="text-xs text-ink-700">DMs delivered</div>
-          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalDmsSent ?? 0"></div>
+    <nav class="flex-1 px-2 py-3 space-y-0.5 text-sm">
+      <template x-for="item in navItems" :key="item.id">
+        <button @click="tab = item.id"
+                class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors"
+                :class="tab === item.id ? 'bg-accent-500 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'">
+          <span x-text="item.icon" class="text-base leading-none w-4 text-center"></span>
+          <span x-text="item.label"></span>
+        </button>
+      </template>
+    </nav>
+
+    <div class="px-3 py-3 border-t border-white/10">
+      <a href="/" class="block px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/10 hover:text-white">← My workspace</a>
+    </div>
+  </aside>
+
+  <!-- ============================== MAIN ============================== -->
+  <div class="flex-1 min-w-0">
+    <header class="sticky top-0 z-40 bg-warm-50/90 backdrop-blur border-b border-warm-200">
+      <div class="px-4 sm:px-6 py-3 flex items-center justify-between">
+        <h1 class="text-sm font-semibold text-ink-900" x-text="currentNavLabel()"></h1>
+        <div class="flex items-center gap-3">
+          <button @click="toggleTheme()" class="w-9 h-9 rounded-full border border-warm-200 flex items-center justify-center text-sm"
+                  :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+            <span x-text="theme === 'dark' ? '☀️' : '🌙'"></span>
+          </button>
+          <div class="relative" x-data="{ open: false }">
+            <button @click="open = !open" class="w-9 h-9 rounded-full bg-warm-200 flex items-center justify-center text-sm font-semibold text-ink-700"
+                    x-text="(me.email || '?').slice(0,1).toUpperCase()"></button>
+            <div x-show="open" @click.outside="open = false" x-cloak
+                 class="absolute right-0 mt-2 w-48 bg-white border border-warm-200 rounded-xl shadow-lg py-1 text-sm">
+              <div class="px-3 py-2 text-ink-700 border-b border-warm-100" x-text="me.email"></div>
+              <button @click="logout()" class="w-full text-left px-3 py-2 hover:bg-warm-50 text-ink-800">Sign out</button>
+            </div>
+          </div>
         </div>
       </div>
-    </section>
+    </header>
 
-    <!-- ============================== TENANTS ============================== -->
-    <section>
-      <h2 class="text-sm font-semibold text-ink-900 mb-3">Tenants</h2>
-      <div class="bg-white border border-warm-200 rounded-2xl overflow-hidden">
-        <table class="w-full text-sm">
-          <thead class="bg-warm-50 text-ink-700 text-xs uppercase tracking-wide">
-            <tr>
-              <th class="text-left px-4 py-2.5">Tenant</th>
-              <th class="text-left px-4 py-2.5">Plan</th>
-              <th class="text-right px-4 py-2.5">Accounts</th>
-              <th class="text-right px-4 py-2.5">Automations</th>
-              <th class="text-right px-4 py-2.5">Triggers</th>
-              <th class="text-right px-4 py-2.5">DMs sent</th>
-              <th class="text-left px-4 py-2.5">Created</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-warm-100">
-            <template x-for="t in overview.tenants" :key="t.id">
+    <main class="px-4 sm:px-6 py-6 space-y-8 max-w-6xl">
+
+      <div x-show="loadError" x-cloak class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+        <span x-text="loadError"></span>
+      </div>
+      <div x-show="toast" x-cloak class="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-3">
+        <span x-text="toast"></span>
+      </div>
+
+      <!-- ============================== OVERVIEW ============================== -->
+      <section x-show="tab === 'overview'" x-cloak class="space-y-6">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div class="bg-white border border-warm-200 rounded-2xl p-4">
+            <div class="text-xs text-ink-700">Tenants</div>
+            <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalTenants ?? 0"></div>
+          </div>
+          <div class="bg-white border border-warm-200 rounded-2xl p-4">
+            <div class="text-xs text-ink-700">Connected accounts</div>
+            <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalConnectedAccounts ?? 0"></div>
+          </div>
+          <div class="bg-white border border-warm-200 rounded-2xl p-4">
+            <div class="text-xs text-ink-700">Automations</div>
+            <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalCampaigns ?? 0"></div>
+          </div>
+          <div class="bg-white border border-warm-200 rounded-2xl p-4">
+            <div class="text-xs text-ink-700">Total triggers</div>
+            <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalTriggers ?? 0"></div>
+          </div>
+          <div class="bg-white border border-warm-200 rounded-2xl p-4">
+            <div class="text-xs text-ink-700">DMs delivered</div>
+            <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalDmsSent ?? 0"></div>
+          </div>
+        </div>
+
+        <div class="bg-white border border-warm-200 rounded-2xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-warm-50 text-ink-700 text-xs uppercase tracking-wide">
               <tr>
-                <td class="px-4 py-3 font-medium text-ink-900">
-                  <div x-text="t.name"></div>
-                  <div class="text-xs text-ink-500" x-text="t.slug"></div>
-                </td>
-                <td class="px-4 py-3">
-                  <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-accent-500/10 text-accent-700" x-text="t.billing_tier"></span>
-                </td>
-                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.connectedAccountCount"></td>
-                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.campaignCount"></td>
-                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.totalTriggers"></td>
-                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.totalDmsSent"></td>
-                <td class="px-4 py-3 text-ink-700" x-text="formatDate(t.created_at)"></td>
+                <th class="text-left px-4 py-2.5">Tenant</th>
+                <th class="text-left px-4 py-2.5">Plan</th>
+                <th class="text-right px-4 py-2.5">Accounts</th>
+                <th class="text-right px-4 py-2.5">Automations</th>
+                <th class="text-right px-4 py-2.5">Triggers</th>
+                <th class="text-right px-4 py-2.5">DMs sent</th>
+                <th class="text-left px-4 py-2.5">Created</th>
               </tr>
-            </template>
-          </tbody>
-        </table>
-        <div x-show="!overview.tenants?.length" class="px-4 py-8 text-sm text-ink-700 text-center">No tenants yet.</div>
-      </div>
-    </section>
-  </main>
+            </thead>
+            <tbody class="divide-y divide-warm-100">
+              <template x-for="t in overview.tenants" :key="t.id">
+                <tr>
+                  <td class="px-4 py-3 font-medium text-ink-900">
+                    <div x-text="t.name"></div>
+                    <div class="text-xs text-ink-500" x-text="t.slug"></div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-accent-500/10 text-accent-700" x-text="t.billing_tier"></span>
+                  </td>
+                  <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.connectedAccountCount"></td>
+                  <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.campaignCount"></td>
+                  <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.totalTriggers"></td>
+                  <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.totalDmsSent"></td>
+                  <td class="px-4 py-3 text-ink-700" x-text="formatDate(t.created_at)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="!overview.tenants?.length" class="px-4 py-8 text-sm text-ink-700 text-center">No tenants yet.</div>
+        </div>
+      </section>
+
+      <!-- ============================== USERS ============================== -->
+      <section x-show="tab === 'users'" x-cloak class="space-y-4">
+        <div class="bg-white border border-warm-200 rounded-2xl overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-warm-50 text-ink-700 text-xs uppercase tracking-wide">
+              <tr>
+                <th class="text-left px-4 py-2.5">User</th>
+                <th class="text-left px-4 py-2.5">Tenant</th>
+                <th class="text-left px-4 py-2.5">Role</th>
+                <th class="text-left px-4 py-2.5">Plan</th>
+                <th class="text-left px-4 py-2.5">Status</th>
+                <th class="px-4 py-2.5"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-warm-100">
+              <template x-for="u in users" :key="u.id">
+                <tr>
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-ink-900" x-text="u.full_name || u.email"></div>
+                    <div class="text-xs text-ink-500" x-text="u.email"></div>
+                  </td>
+                  <td class="px-4 py-3 text-ink-700" x-text="u.tenant_name"></td>
+                  <td class="px-4 py-3">
+                    <select :value="u.role" @change="updateUser(u, { role: $event.target.value })"
+                            class="text-xs rounded-lg border border-warm-300 px-2 py-1">
+                      <option value="owner">owner</option>
+                      <option value="admin">admin</option>
+                      <option value="member">member</option>
+                      <option value="viewer">viewer</option>
+                    </select>
+                  </td>
+                  <td class="px-4 py-3">
+                    <select :value="u.billing_tier" @change="updateTenant(u, { billingTier: $event.target.value })"
+                            class="text-xs rounded-lg border border-warm-300 px-2 py-1">
+                      <option value="trial">trial</option>
+                      <option value="starter">starter</option>
+                      <option value="growth">growth</option>
+                      <option value="scale">scale</option>
+                      <option value="enterprise">enterprise</option>
+                    </select>
+                  </td>
+                  <td class="px-4 py-3">
+                    <button @click="updateTenant(u, { isActive: !u.tenant_is_active })"
+                            class="text-xs font-medium px-2 py-0.5 rounded-full"
+                            :class="u.tenant_is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                            x-text="u.tenant_is_active ? 'Active' : 'Suspended'"></button>
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    <button @click="resetUserPassword(u)" class="text-xs font-medium text-accent-600 hover:text-accent-700">Reset password</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="!users.length" class="px-4 py-8 text-sm text-ink-700 text-center">No users yet.</div>
+        </div>
+        <div x-show="resetPasswordResult" x-cloak class="bg-warm-100 border border-warm-300 rounded-xl px-4 py-3 text-sm">
+          <span x-text="resetPasswordResult"></span>
+        </div>
+      </section>
+
+      <!-- ============================== NOTIFICATIONS ============================== -->
+      <section x-show="tab === 'notifications'" x-cloak class="space-y-4 max-w-xl">
+        <div class="bg-white border border-warm-200 rounded-2xl p-5 space-y-4">
+          <h2 class="text-sm font-semibold text-ink-900">Send a notification</h2>
+
+          <div>
+            <label class="block text-xs font-medium text-ink-700 mb-1">Send to</label>
+            <select x-model="notifyForm.userId" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm">
+              <option value="">Everyone (all tenants)</option>
+              <template x-for="u in users" :key="u.id">
+                <option :value="u.id" x-text="(u.full_name || u.email) + ' — ' + u.tenant_name"></option>
+              </template>
+            </select>
+          </div>
+
+          <div class="flex gap-4 text-sm">
+            <label class="flex items-center gap-1.5"><input type="radio" value="in_app" x-model="notifyForm.channel" /> In-app notification</label>
+            <label class="flex items-center gap-1.5"><input type="radio" value="email" x-model="notifyForm.channel" /> Email</label>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-ink-700 mb-1">Title</label>
+            <input x-model="notifyForm.title" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-ink-700 mb-1">Message</label>
+            <textarea x-model="notifyForm.body" rows="4" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm"></textarea>
+          </div>
+
+          <p x-show="notifyForm.channel === 'email'" x-cloak class="text-xs text-ink-500">
+            Sends via the SMTP server configured under Payments & Channels → Email delivery. Nothing sends until that's set up.
+          </p>
+
+          <div x-show="notifyError" x-cloak class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="notifyError"></div>
+
+          <button @click="sendNotification()" :disabled="notifySending"
+                  class="bg-accent-500 hover:bg-accent-600 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-xl">
+            <span x-show="!notifySending">Send</span>
+            <span x-show="notifySending" x-cloak>Sending…</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ============================== PAYMENTS & CHANNELS ============================== -->
+      <section x-show="tab === 'payments'" x-cloak class="space-y-6 max-w-2xl">
+        <div x-show="settingsError" x-cloak class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="settingsError"></div>
+
+        <!-- Email delivery (SMTP) -->
+        <div class="bg-white border border-warm-200 rounded-2xl p-5 space-y-3">
+          <h2 class="text-sm font-semibold text-ink-900">Email delivery (SMTP)</h2>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="block text-xs font-medium text-ink-700 mb-1">Host</label>
+              <input x-model="settings.smtpHost" placeholder="smtp.yourprovider.com" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" /></div>
+            <div><label class="block text-xs font-medium text-ink-700 mb-1">Port</label>
+              <input x-model.number="settings.smtpPort" type="number" placeholder="587" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" /></div>
+            <div><label class="block text-xs font-medium text-ink-700 mb-1">Username</label>
+              <input x-model="settings.smtpUsername" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" /></div>
+            <div><label class="block text-xs font-medium text-ink-700 mb-1">Password</label>
+              <input x-model="settings.smtpPassword" type="password" :placeholder="settings.smtpPasswordConfigured ? '•••••••• (saved — leave blank to keep)' : ''"
+                     class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" /></div>
+            <div class="col-span-2"><label class="block text-xs font-medium text-ink-700 mb-1">From address</label>
+              <input x-model="settings.smtpFromEmail" placeholder="noreply@yourdomain.com" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" /></div>
+          </div>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="settings.smtpSecure" /> Use TLS/SSL</label>
+        </div>
+
+        <!-- Payment gateways -->
+        <div class="bg-white border border-warm-200 rounded-2xl p-5 space-y-5">
+          <h2 class="text-sm font-semibold text-ink-900">Payment gateways</h2>
+
+          <div class="border-t border-warm-100 pt-4 first:border-0 first:pt-0 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.stripeEnabled" /> Stripe</label>
+            <input x-model="settings.stripePublishableKey" placeholder="Publishable key (pk_...)" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.stripeSecretKey" type="password" :placeholder="settings.stripeSecretKeyConfigured ? '•••••••• (saved — leave blank to keep)' : 'Secret key (sk_...)'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+
+          <div class="border-t border-warm-100 pt-4 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.paypalEnabled" /> PayPal</label>
+            <input x-model="settings.paypalClientId" placeholder="Client ID" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.paypalClientSecret" type="password" :placeholder="settings.paypalClientSecretConfigured ? '•••••••• (saved — leave blank to keep)' : 'Client secret'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+
+          <div class="border-t border-warm-100 pt-4 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.safepayEnabled" /> Safepay</label>
+            <input x-model="settings.safepayApiKey" type="password" :placeholder="settings.safepayApiKeyConfigured ? '•••••••• (saved — leave blank to keep)' : 'API key'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.safepaySecretKey" type="password" :placeholder="settings.safepaySecretKeyConfigured ? '•••••••• (saved — leave blank to keep)' : 'Secret key'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+
+          <div class="border-t border-warm-100 pt-4 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.payfastEnabled" /> PayFast</label>
+            <input x-model="settings.payfastMerchantId" placeholder="Merchant ID" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.payfastMerchantKey" type="password" :placeholder="settings.payfastMerchantKeyConfigured ? '•••••••• (saved — leave blank to keep)' : 'Merchant key'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.payfastPassphrase" type="password" :placeholder="settings.payfastPassphraseConfigured ? '•••••••• (saved — leave blank to keep)' : 'Passphrase'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+
+        <!-- Channels -->
+        <div class="bg-white border border-warm-200 rounded-2xl p-5 space-y-5">
+          <h2 class="text-sm font-semibold text-ink-900">Channels</h2>
+
+          <div class="border-t border-warm-100 pt-4 first:border-0 first:pt-0">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.instagramEnabled" /> Instagram</label>
+            <p class="text-xs text-ink-500 mt-1">Uses the META_APP_ID / META_APP_SECRET environment variables already configured for this deployment.</p>
+          </div>
+
+          <div class="border-t border-warm-100 pt-4 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.tiktokEnabled" /> TikTok</label>
+            <input x-model="settings.tiktokClientKey" placeholder="Client key" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.tiktokClientSecret" type="password" :placeholder="settings.tiktokClientSecretConfigured ? '•••••••• (saved — leave blank to keep)' : 'Client secret'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+
+          <div class="border-t border-warm-100 pt-4 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.youtubeEnabled" /> YouTube</label>
+            <input x-model="settings.youtubeClientId" placeholder="Client ID" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.youtubeClientSecret" type="password" :placeholder="settings.youtubeClientSecretConfigured ? '•••••••• (saved — leave blank to keep)' : 'Client secret'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+
+          <div class="border-t border-warm-100 pt-4 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" x-model="settings.twitterEnabled" /> Twitter / X</label>
+            <input x-model="settings.twitterApiKey" placeholder="API key" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+            <input x-model="settings.twitterApiSecret" type="password" :placeholder="settings.twitterApiSecretConfigured ? '•••••••• (saved — leave blank to keep)' : 'API secret'"
+                   class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+        </div>
+
+        <button @click="saveSettings()" :disabled="settingsSaving"
+                class="bg-accent-500 hover:bg-accent-600 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-xl">
+          <span x-show="!settingsSaving">Save settings</span>
+          <span x-show="settingsSaving" x-cloak>Saving…</span>
+        </button>
+      </section>
+
+      <!-- ============================== ACCOUNT & SECURITY ============================== -->
+      <section x-show="tab === 'account'" x-cloak class="space-y-6 max-w-lg">
+        <div class="bg-white border border-warm-200 rounded-2xl p-5 space-y-3">
+          <h2 class="text-sm font-semibold text-ink-900">Profile</h2>
+          <div>
+            <label class="block text-xs font-medium text-ink-700 mb-1">Username</label>
+            <input x-model="profileForm.username" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-ink-700 mb-1">Full name</label>
+            <input x-model="profileForm.fullName" class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-ink-700 mb-1">Email</label>
+            <input :value="me.email" disabled class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm bg-warm-50 text-ink-500" />
+          </div>
+          <div x-show="profileError" x-cloak class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="profileError"></div>
+          <button @click="saveProfile()" :disabled="profileSaving"
+                  class="bg-accent-500 hover:bg-accent-600 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-xl">
+            <span x-show="!profileSaving">Save profile</span>
+            <span x-show="profileSaving" x-cloak>Saving…</span>
+          </button>
+        </div>
+
+        <div class="bg-white border border-warm-200 rounded-2xl p-5 space-y-3">
+          <h2 class="text-sm font-semibold text-ink-900">Change password</h2>
+          <input x-model="passwordForm.currentPassword" type="password" placeholder="Current password"
+                 class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          <input x-model="passwordForm.newPassword" type="password" placeholder="New password (min. 8 characters)"
+                 class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+          <div x-show="passwordError" x-cloak class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="passwordError"></div>
+          <div x-show="passwordSuccess" x-cloak class="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">Password updated.</div>
+          <button @click="changePassword()" :disabled="passwordSaving"
+                  class="bg-accent-500 hover:bg-accent-600 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-xl">
+            <span x-show="!passwordSaving">Update password</span>
+            <span x-show="passwordSaving" x-cloak>Updating…</span>
+          </button>
+        </div>
+
+        <div class="bg-white border border-warm-200 rounded-2xl p-5 space-y-3">
+          <h2 class="text-sm font-semibold text-ink-900">Two-factor authentication</h2>
+
+          <template x-if="me.totpEnabled && !twoFa.setupInFlight">
+            <div class="space-y-3">
+              <p class="text-sm text-green-700">✅ Enabled — you'll be asked for a code at login.</p>
+              <input x-model="twoFa.disablePassword" type="password" placeholder="Confirm password to disable"
+                     class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+              <button @click="disable2fa()" class="text-sm font-medium text-red-600 hover:text-red-700">Disable 2FA</button>
+            </div>
+          </template>
+
+          <template x-if="!me.totpEnabled && !twoFa.setupInFlight">
+            <button @click="start2faSetup()" class="bg-accent-500 hover:bg-accent-600 text-white text-sm font-semibold px-4 py-2 rounded-xl">
+              Set up 2FA
+            </button>
+          </template>
+
+          <template x-if="twoFa.setupInFlight">
+            <div class="space-y-3">
+              <p class="text-sm text-ink-700">Scan with Google Authenticator, Authy, or 1Password:</p>
+              <img :src="twoFa.qrImageUrl" alt="2FA QR code" class="rounded-xl border border-warm-200" width="180" height="180" />
+              <p class="text-xs text-ink-500">Or enter manually: <code class="bg-warm-100 px-1.5 py-0.5 rounded" x-text="twoFa.secret"></code></p>
+              <input x-model="twoFa.token" placeholder="6-digit code" maxlength="6"
+                     class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm" />
+              <div x-show="twoFa.error" x-cloak class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="twoFa.error"></div>
+              <div class="flex gap-2">
+                <button @click="verify2fa()" class="bg-accent-500 hover:bg-accent-600 text-white text-sm font-semibold px-4 py-2 rounded-xl">Verify &amp; enable</button>
+                <button @click="twoFa.setupInFlight = false" class="text-sm font-medium text-ink-700 px-4 py-2">Cancel</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+
+    </main>
+  </div>
 </div>
 
 <script>
 function nexusAdmin() {
   return {
+    me: {},
     overview: {},
+    users: [],
     loadError: '',
+    toast: '',
+    tab: 'overview',
+    theme: 'light',
+
+    navItems: [
+      { id: 'overview', label: 'Overview', icon: '📊' },
+      { id: 'users', label: 'Users', icon: '👥' },
+      { id: 'notifications', label: 'Notifications', icon: '🔔' },
+      { id: 'payments', label: 'Payments & Channels', icon: '💳' },
+      { id: 'account', label: 'Account & Security', icon: '🔒' },
+    ],
+
+    resetPasswordResult: '',
+
+    notifyForm: { userId: '', channel: 'in_app', title: '', body: '' },
+    notifyError: '',
+    notifySending: false,
+
+    settings: {},
+    settingsError: '',
+    settingsSaving: false,
+
+    profileForm: { username: '', fullName: '' },
+    profileError: '',
+    profileSaving: false,
+
+    passwordForm: { currentPassword: '', newPassword: '' },
+    passwordError: '',
+    passwordSuccess: false,
+    passwordSaving: false,
+
+    twoFa: { setupInFlight: false, secret: '', qrImageUrl: '', token: '', error: '', disablePassword: '' },
 
     async init() {
       try {
@@ -127,17 +490,205 @@ function nexusAdmin() {
           window.location.href = '/login.html';
           return;
         }
-        const me = await meRes.json();
-        if (!me.isPlatformAdmin) {
+        this.me = await meRes.json();
+        if (!this.me.isPlatformAdmin) {
           window.location.href = '/';
           return;
         }
-        const res = await fetch('/api/admin/overview');
-        if (!res.ok) throw new Error('overview fetch failed');
-        this.overview = await res.json();
+        this.theme = this.me.themePreference || 'light';
+        this.profileForm = { username: this.me.username || '', fullName: this.me.fullName || '' };
+
+        await Promise.all([this.loadOverview(), this.loadUsers(), this.loadSettings()]);
       } catch (err) {
         this.loadError = 'Failed to load admin dashboard: ' + err.message;
       }
+    },
+
+    currentNavLabel() {
+      const item = this.navItems.find((n) => n.id === this.tab);
+      return item ? item.label : '';
+    },
+
+    showToast(msg) {
+      this.toast = msg;
+      setTimeout(() => { this.toast = ''; }, 3000);
+    },
+
+    async toggleTheme() {
+      this.theme = this.theme === 'dark' ? 'light' : 'dark';
+      await fetch('/api/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themePreference: this.theme }),
+      });
+    },
+
+    async loadOverview() {
+      const res = await fetch('/api/admin/overview');
+      if (!res.ok) throw new Error('overview fetch failed');
+      this.overview = await res.json();
+    },
+
+    async loadUsers() {
+      const res = await fetch('/api/admin/users');
+      if (!res.ok) throw new Error('users fetch failed');
+      this.users = await res.json();
+    },
+
+    async loadSettings() {
+      const res = await fetch('/api/admin/settings');
+      if (!res.ok) throw new Error('settings fetch failed');
+      this.settings = await res.json();
+    },
+
+    async updateUser(u, patch) {
+      const res = await fetch(`/api/admin/users/${u.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) { await this.loadUsers(); this.showToast('User updated.'); }
+    },
+
+    async updateTenant(u, patch) {
+      const res = await fetch(`/api/admin/tenants/${u.tenant_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) { await this.loadUsers(); this.showToast('Tenant updated.'); }
+    },
+
+    async resetUserPassword(u) {
+      const res = await fetch(`/api/admin/users/${u.id}/reset-password`, { method: 'POST' });
+      if (!res.ok) return;
+      const body = await res.json();
+      this.resetPasswordResult = `New temporary password for ${body.email}: ${body.temporaryPassword} — share this with them securely, it won't be shown again.`;
+    },
+
+    async sendNotification() {
+      this.notifySending = true;
+      this.notifyError = '';
+      try {
+        const res = await fetch('/api/admin/notifications', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.notifyForm),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Send failed');
+        }
+        this.notifyForm = { userId: '', channel: 'in_app', title: '', body: '' };
+        this.showToast('Notification sent.');
+      } catch (err) {
+        this.notifyError = err.message;
+      } finally {
+        this.notifySending = false;
+      }
+    },
+
+    async saveSettings() {
+      this.settingsSaving = true;
+      this.settingsError = '';
+      try {
+        const res = await fetch('/api/admin/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.settings),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Save failed');
+        }
+        await this.loadSettings();
+        this.showToast('Settings saved.');
+      } catch (err) {
+        this.settingsError = err.message;
+      } finally {
+        this.settingsSaving = false;
+      }
+    },
+
+    async saveProfile() {
+      this.profileSaving = true;
+      this.profileError = '';
+      try {
+        const res = await fetch('/api/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.profileForm),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Save failed');
+        }
+        this.me = { ...this.me, ...(await res.json()) };
+        this.showToast('Profile saved.');
+      } catch (err) {
+        this.profileError = err.message;
+      } finally {
+        this.profileSaving = false;
+      }
+    },
+
+    async changePassword() {
+      this.passwordSaving = true;
+      this.passwordError = '';
+      this.passwordSuccess = false;
+      try {
+        const res = await fetch('/api/me/password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.passwordForm),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Update failed');
+        }
+        this.passwordForm = { currentPassword: '', newPassword: '' };
+        this.passwordSuccess = true;
+      } catch (err) {
+        this.passwordError = err.message;
+      } finally {
+        this.passwordSaving = false;
+      }
+    },
+
+    async start2faSetup() {
+      const res = await fetch('/api/me/2fa/setup', { method: 'POST' });
+      if (!res.ok) return;
+      const body = await res.json();
+      this.twoFa = { setupInFlight: true, secret: body.secret, qrImageUrl: body.qrImageUrl, token: '', error: '', disablePassword: '' };
+    },
+
+    async verify2fa() {
+      this.twoFa.error = '';
+      const res = await fetch('/api/me/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: this.twoFa.token }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        this.twoFa.error = body.error || 'Verification failed';
+        return;
+      }
+      this.me.totpEnabled = true;
+      this.twoFa.setupInFlight = false;
+      this.showToast('Two-factor authentication enabled.');
+    },
+
+    async disable2fa() {
+      const res = await fetch('/api/me/2fa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: this.twoFa.disablePassword }),
+      });
+      if (!res.ok) return;
+      this.me.totpEnabled = false;
+      this.twoFa.disablePassword = '';
+      this.showToast('Two-factor authentication disabled.');
     },
 
     async logout() {

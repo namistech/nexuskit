@@ -37,21 +37,34 @@
 
     <div x-show="error" x-cloak class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="error"></div>
 
-    <div>
-      <label class="block text-xs font-medium text-ink-700 mb-1">Email</label>
-      <input type="email" x-model="email" required autocomplete="email"
-             class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/40" />
-    </div>
+    <template x-if="!awaitingTotp">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-ink-700 mb-1">Email</label>
+          <input type="email" x-model="email" required autocomplete="email"
+                 class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/40" />
+        </div>
 
-    <div>
-      <label class="block text-xs font-medium text-ink-700 mb-1">Password</label>
-      <input type="password" x-model="password" required autocomplete="current-password"
-             class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/40" />
-    </div>
+        <div>
+          <label class="block text-xs font-medium text-ink-700 mb-1">Password</label>
+          <input type="password" x-model="password" required autocomplete="current-password"
+                 class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/40" />
+        </div>
+      </div>
+    </template>
+
+    <template x-if="awaitingTotp">
+      <div>
+        <label class="block text-xs font-medium text-ink-700 mb-1">Authentication code</label>
+        <p class="text-xs text-ink-500 mb-2">Enter the 6-digit code from your authenticator app.</p>
+        <input type="text" x-model="totpToken" inputmode="numeric" maxlength="6" required autofocus
+               class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/40" />
+      </div>
+    </template>
 
     <button type="submit" :disabled="loading"
             class="w-full bg-accent-500 hover:bg-accent-600 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm transition-colors">
-      <span x-show="!loading">Sign in</span>
+      <span x-show="!loading" x-text="awaitingTotp ? 'Verify' : 'Sign in'"></span>
       <span x-show="loading" x-cloak>Signing in…</span>
     </button>
   </form>
@@ -62,6 +75,8 @@ function loginForm() {
   return {
     email: '',
     password: '',
+    totpToken: '',
+    awaitingTotp: false,
     loading: false,
     error: '',
     async submit() {
@@ -71,10 +86,15 @@ function loginForm() {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: this.email, password: this.password }),
+          body: JSON.stringify({ email: this.email, password: this.password, totpToken: this.totpToken || undefined }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
+          if (body.requiresTotp) {
+            this.awaitingTotp = true;
+            this.error = '';
+            return;
+          }
           throw new Error(body.error || 'Sign in failed');
         }
         const me = await res.json();
