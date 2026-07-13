@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NexusKit — Admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.1/cdn.min.js" defer></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          warm: { 50: '#FAF8F5', 100: '#F3EEE7', 200: '#E7DDD1', 300: '#D6C6B3' },
+          accent: { 500: '#C2703D', 600: '#A85A2C', 700: '#8A481F' },
+          ink: { 700: '#44403C', 800: '#33302C', 900: '#211F1B' },
+        },
+        fontFamily: { sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Inter', 'sans-serif'] },
+      },
+    },
+  };
+</script>
+<style>[x-cloak] { display: none !important; }</style>
+</head>
+<body class="bg-warm-50 text-ink-800 font-sans antialiased">
+
+<div x-data="nexusAdmin()" x-init="init()" class="min-h-screen" x-cloak>
+
+  <header class="sticky top-0 z-40 bg-ink-900 text-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-accent-500 flex items-center justify-center text-white font-bold text-sm">N</div>
+        <span class="font-semibold text-lg">NexusKit</span>
+        <span class="text-[11px] font-medium uppercase tracking-wide bg-white/10 px-2 py-0.5 rounded-full">Platform admin</span>
+      </div>
+      <div class="flex items-center gap-3 text-sm">
+        <a href="/" class="text-white/80 hover:text-white">My workspace</a>
+        <button @click="logout()" class="text-white/80 hover:text-white">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-10">
+
+    <div x-show="loadError" x-cloak class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+      <span x-text="loadError"></span>
+    </div>
+
+    <!-- ============================== PLATFORM TOTALS ============================== -->
+    <section>
+      <h2 class="text-sm font-semibold text-ink-900 mb-3">Platform totals</h2>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="bg-white border border-warm-200 rounded-2xl p-4">
+          <div class="text-xs text-ink-700">Tenants</div>
+          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalTenants ?? 0"></div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-2xl p-4">
+          <div class="text-xs text-ink-700">Connected accounts</div>
+          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalConnectedAccounts ?? 0"></div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-2xl p-4">
+          <div class="text-xs text-ink-700">Automations</div>
+          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalCampaigns ?? 0"></div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-2xl p-4">
+          <div class="text-xs text-ink-700">Total triggers</div>
+          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalTriggers ?? 0"></div>
+        </div>
+        <div class="bg-white border border-warm-200 rounded-2xl p-4">
+          <div class="text-xs text-ink-700">DMs delivered</div>
+          <div class="text-2xl font-semibold text-ink-900 mt-1" x-text="overview.platformTotals?.totalDmsSent ?? 0"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== TENANTS ============================== -->
+    <section>
+      <h2 class="text-sm font-semibold text-ink-900 mb-3">Tenants</h2>
+      <div class="bg-white border border-warm-200 rounded-2xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-warm-50 text-ink-700 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left px-4 py-2.5">Tenant</th>
+              <th class="text-left px-4 py-2.5">Plan</th>
+              <th class="text-right px-4 py-2.5">Accounts</th>
+              <th class="text-right px-4 py-2.5">Automations</th>
+              <th class="text-right px-4 py-2.5">Triggers</th>
+              <th class="text-right px-4 py-2.5">DMs sent</th>
+              <th class="text-left px-4 py-2.5">Created</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-warm-100">
+            <template x-for="t in overview.tenants" :key="t.id">
+              <tr>
+                <td class="px-4 py-3 font-medium text-ink-900">
+                  <div x-text="t.name"></div>
+                  <div class="text-xs text-ink-500" x-text="t.slug"></div>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-accent-500/10 text-accent-700" x-text="t.billing_tier"></span>
+                </td>
+                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.connectedAccountCount"></td>
+                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.campaignCount"></td>
+                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.totalTriggers"></td>
+                <td class="px-4 py-3 text-right text-ink-900" x-text="t.stats.totalDmsSent"></td>
+                <td class="px-4 py-3 text-ink-700" x-text="formatDate(t.created_at)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div x-show="!overview.tenants?.length" class="px-4 py-8 text-sm text-ink-700 text-center">No tenants yet.</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+function nexusAdmin() {
+  return {
+    overview: {},
+    loadError: '',
+
+    async init() {
+      try {
+        const meRes = await fetch('/api/me');
+        if (meRes.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+        const me = await meRes.json();
+        if (!me.isPlatformAdmin) {
+          window.location.href = '/';
+          return;
+        }
+        const res = await fetch('/api/admin/overview');
+        if (!res.ok) throw new Error('overview fetch failed');
+        this.overview = await res.json();
+      } catch (err) {
+        this.loadError = 'Failed to load admin dashboard: ' + err.message;
+      }
+    },
+
+    async logout() {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/login.html';
+    },
+
+    formatDate(iso) {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleDateString();
+    },
+  };
+}
+</script>
+
+</body>
+</html>

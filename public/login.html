@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NexusKit — Sign in</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.1/cdn.min.js" defer></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          warm: { 50: '#FAF8F5', 100: '#F3EEE7', 200: '#E7DDD1', 300: '#D6C6B3' },
+          accent: { 500: '#C2703D', 600: '#A85A2C', 700: '#8A481F' },
+          ink: { 700: '#44403C', 800: '#33302C', 900: '#211F1B' },
+        },
+        fontFamily: { sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Inter', 'sans-serif'] },
+      },
+    },
+  };
+</script>
+</head>
+<body class="bg-warm-50 text-ink-800 font-sans antialiased min-h-screen flex items-center justify-center px-4">
+
+<div x-data="loginForm()" class="w-full max-w-sm">
+  <div class="flex items-center justify-center gap-2 mb-8">
+    <div class="w-9 h-9 rounded-lg bg-accent-500 flex items-center justify-center text-white font-bold">N</div>
+    <span class="font-semibold text-ink-900 text-xl">NexusKit</span>
+  </div>
+
+  <form @submit.prevent="submit" class="bg-white border border-warm-200 rounded-2xl shadow-sm p-6 space-y-4">
+    <div>
+      <h1 class="text-lg font-semibold text-ink-900">Sign in</h1>
+      <p class="text-sm text-ink-700 mt-1">Access your NexusKit workspace.</p>
+    </div>
+
+    <div x-show="error" x-cloak class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" x-text="error"></div>
+
+    <div>
+      <label class="block text-xs font-medium text-ink-700 mb-1">Email</label>
+      <input type="email" x-model="email" required autocomplete="email"
+             class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/40" />
+    </div>
+
+    <div>
+      <label class="block text-xs font-medium text-ink-700 mb-1">Password</label>
+      <input type="password" x-model="password" required autocomplete="current-password"
+             class="w-full rounded-xl border border-warm-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500/40" />
+    </div>
+
+    <button type="submit" :disabled="loading"
+            class="w-full bg-accent-500 hover:bg-accent-600 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm transition-colors">
+      <span x-show="!loading">Sign in</span>
+      <span x-show="loading" x-cloak>Signing in…</span>
+    </button>
+  </form>
+</div>
+
+<script>
+function loginForm() {
+  return {
+    email: '',
+    password: '',
+    loading: false,
+    error: '',
+    async submit() {
+      this.loading = true;
+      this.error = '';
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.email, password: this.password }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Sign in failed');
+        }
+        const me = await res.json();
+        window.location.href = me.isPlatformAdmin ? '/admin.html' : '/';
+      } catch (err) {
+        this.error = err.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
+</script>
+
+</body>
+</html>
