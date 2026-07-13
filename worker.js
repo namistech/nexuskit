@@ -42,17 +42,24 @@ async function getConnectedAccount(connectedAccountId) {
   return result.rows[0];
 }
 
-async function sendInstagramDm({ igBusinessAccountId, recipientId, message, accessToken }) {
+async function sendInstagramDm({ igCommentId, message, accessToken }) {
+  // Comment-triggered auto-replies must use the private_replies endpoint,
+  // not the generic /{ig-user-id}/messages endpoint. The generic messages
+  // endpoint enforces the standard 24h human-agent messaging window and
+  // rejects sends to users who haven't DM'd the account first (error code
+  // 10 / subcode 2534022, "sent outside of allowed window"). Private
+  // replies are keyed to the specific comment (not the recipient) and are
+  // exempt from that window because they're a direct response to public
+  // comment engagement -- this is the actual comment-to-DM mechanism.
   // Using the Instagram API with Instagram Login (graph.instagram.com), not the
   // classic Facebook Page-linked flow (graph.facebook.com) -- the access token
   // is an Instagram User Access Token, not a Page Access Token.
-  const url = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igBusinessAccountId}/messages`;
+  const url = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igCommentId}/private_replies`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      recipient: { id: recipientId },
-      message: { text: message },
+      message,
       access_token: accessToken,
     }),
   });
@@ -114,8 +121,7 @@ const worker = new Worker(
 
     try {
       await sendInstagramDm({
-        igBusinessAccountId: account.ig_business_account_id,
-        recipientId: igCommenterId,
+        igCommentId,
         message: messageText,
         accessToken,
       });
