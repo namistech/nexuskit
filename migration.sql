@@ -69,7 +69,9 @@ CREATE TABLE connected_accounts (
                                 CHECK (platform IN ('instagram', 'facebook')),
     ig_business_account_id  VARCHAR(64) NOT NULL,   -- Meta IG Business Account ID (webhook entry.id)
     ig_username             VARCHAR(255),
-    fb_page_id              VARCHAR(64) NOT NULL,   -- linked FB Page ID
+    fb_page_id              VARCHAR(64),            -- only set for the classic Page-linked
+                                                       -- flow; NULL for Instagram API with
+                                                       -- Instagram Login (no Page involved)
     access_token_encrypted  BYTEA NOT NULL,          -- AES-256-GCM ciphertext
     access_token_iv         BYTEA NOT NULL,          -- 12-byte IV, unique per encryption
     access_token_auth_tag   BYTEA NOT NULL,          -- GCM auth tag

@@ -43,7 +43,10 @@ async function getConnectedAccount(connectedAccountId) {
 }
 
 async function sendInstagramDm({ igBusinessAccountId, recipientId, message, accessToken }) {
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${igBusinessAccountId}/messages`;
+  // Using the Instagram API with Instagram Login (graph.instagram.com), not the
+  // classic Facebook Page-linked flow (graph.facebook.com) -- the access token
+  // is an Instagram User Access Token, not a Page Access Token.
+  const url = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igBusinessAccountId}/messages`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
